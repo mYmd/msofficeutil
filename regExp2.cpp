@@ -118,9 +118,13 @@ namespace mymd  {
                     if ( match_ahead == positive )   break;
                     auto first = wm_behind[0].first + 1;
                     match_behind = std::regex_search(first, target.end(), wm_behind, wrg_behind);
-                    prefix_ = std::wstring{target.begin(), wm_behind.prefix().second};
+                    prefix_ = std::wstring{target.begin(), first};
                 }
-                if ( match_ahead != positive )       wm_behind.swap(std::wsmatch{});    //‰Šú‰»
+                if ( match_ahead != positive )
+                {
+                    prefix_.clear();
+                    wm_behind.swap(std::wsmatch{});    //‰Šú‰»
+                }
             }
             match_ = std::wstring{wm_behind.str(0)};
             suffix_ = std::wstring{wm_behind.suffix()};
