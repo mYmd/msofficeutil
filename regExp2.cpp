@@ -25,9 +25,9 @@ RegExpExec(VARIANT const& ptrn, VARIANT const& target, __int8 icase)
         sub_vec.push_back(mymd::bstrVariant(submatches[i]));
     }
     std::array<VARIANT, 4> arr = { mymd::bstrVariant(re2.match())   ,
-                                   mymd::bstrVariant(re2.prefix())  ,
-                                   mymd::bstrVariant(re2.suffix())  ,
-                                   mymd::range2VArray(sub_vec.begin(), sub_vec.end()) };
+        mymd::bstrVariant(re2.prefix())  ,
+        mymd::bstrVariant(re2.suffix())  ,
+        mymd::range2VArray(sub_vec.begin(), sub_vec.end()) };
     return mymd::range2VArray(arr.begin(), arr.end());
 }
 
@@ -98,26 +98,26 @@ namespace mymd  {
             std::wsmatch wm_behind;
             auto type = std::regex_constants::ECMAScript;
             if ( icase )    type |= std::regex_constants::icase;
-            std::wregex wrg2{p_behind, type};
+            std::wregex wrg_behind{p_behind, type};
             if ( 0 == positive_negative )
             {
-                std::regex_search(target, wm_behind, wrg2);
+                std::regex_search(target, wm_behind, wrg_behind);
                 prefix_ = std::wstring{wm_behind.prefix()};
             }
             else
             {
                 bool const positive = (positive_negative == 1);
-                std::wregex wrg1{p_ahead, type};
+                std::wregex wrg_ahead{p_ahead, type};
                 std::wsmatch wm_ahead;
-                bool match_behind = std::regex_search(target, wm_behind, wrg2);
+                bool match_behind = std::regex_search(target, wm_behind, wrg_behind);
                 prefix_ = wm_behind.prefix();
                 bool match_ahead;
                 while ( match_behind && (wm_behind[0].first < target.end()) )
                 {
-                    match_ahead = std::regex_search(prefix_, wm_ahead, wrg1);
+                    match_ahead = std::regex_search(prefix_, wm_ahead, wrg_ahead);
                     if ( match_ahead == positive )   break;
                     auto first = wm_behind[0].first + 1;
-                    match_behind = std::regex_search(first, target.end(), wm_behind, wrg2);
+                    match_behind = std::regex_search(first, target.end(), wm_behind, wrg_behind);
                     prefix_ = std::wstring{target.begin(), wm_behind.prefix().second};
                 }
                 if ( match_ahead != positive )       wm_behind.swap(std::wsmatch{});    //‰Šú‰»
@@ -126,6 +126,7 @@ namespace mymd  {
             suffix_ = std::wstring{wm_behind.suffix()};
             submatches_.clear();
             auto n = wm_behind.size();
+            submatches_.reserve(n-1);
             for ( std::size_t i = 1; i < n; ++i )
             {
                 submatches_.push_back(wm_behind.str(i));
