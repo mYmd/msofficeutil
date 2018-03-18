@@ -1,0 +1,8 @@
+; msofficeutil.def : DLL 用のモジュール パラメータ宣言
+
+LIBRARY		"msofficeutil"
+
+EXPORTS
+    ; 明示的なエクスポートはここへ記述できます
+
+	RegExpExec = RegExpExec
