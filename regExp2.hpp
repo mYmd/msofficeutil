@@ -15,7 +15,7 @@ namespace mymd  {
         std::vector<std::wstring> submatches_;
     public:
         regexp2(std::wstring const& pattern);
-        void execute(std::wstring const& target, bool icase);
+        void execute(std::wstring const& target, bool icase, std::wstring const* original = nullptr);
         std::wstring const& match() const;
         std::wstring const& prefix() const;
         std::wstring const& suffix() const;

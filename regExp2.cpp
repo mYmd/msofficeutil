@@ -3,6 +3,7 @@
 #include "msofficeutil.h"
 #include "regExp2.hpp"
 #include <array>
+#include <algorithm>
 
 //肯定後読み、否定後読みを実装した正規表現
 //ただし (?<= と (?<! はパターンの先頭に限る
@@ -15,7 +16,7 @@ RegExpExec(VARIANT const& ptrn, VARIANT const& target, __int8 icase)
     auto const targetStr = mymd::getBSTR(target);
     if ( !pattern || !targetStr )   return mymd::iVariant();
     mymd::regexp2 re2{pattern};
-    re2.execute(targetStr, icase != 0);
+    re2.execute(targetStr, icase != 0, nullptr);
     auto const& submatches = re2.submatches();
     std::vector<VARIANT> sub_vec;
     auto n = submatches.size();
@@ -32,6 +33,8 @@ RegExpExec(VARIANT const& ptrn, VARIANT const& target, __int8 icase)
 }
 
 namespace mymd  {
+
+    std::locale stdLocale = std::locale::classic();
 
     regexp2::regexp2(std::wstring const& pattern) : positive_negative{0}
     {
@@ -88,20 +91,46 @@ namespace mymd  {
         return submatches_;
     }
 
-    void regexp2::execute(std::wstring const& target, bool icase)
+    //
+    std::wstring getOrinal(std::wstring const&                  target  , 
+                           std::wstring const*                  original,
+                           std::wsmatch::value_type::iterator   begin   ,
+                           std::wsmatch::value_type::iterator   end     )
     {
+        return ( begin < end )? original->substr(begin - target.begin(), end - begin): std::wstring{};
+    }
+
+    void regexp2::execute(std::wstring const& target, bool icase, std::wstring const* original)
+    {
+        // VC++のregexのバグをworkaround
+        // icase 指定時に[a-z]$ も [A-Z]$ も "ABC" にマッチしない問題
+        // icase 指定時は target を小文字に揃えてしまう
+        if ( icase )
+        {
+            auto lowerTarget(target);
+            std::transform(lowerTarget.begin(), lowerTarget.end(), lowerTarget.begin(),
+                           [](wchar_t x) { return std::tolower(x, stdLocale);} );
+            execute(lowerTarget, false, &target);   //再帰
+            return;
+        }
         prefix_.clear();
         suffix_.clear();
         match_.clear();
         submatches_.clear();
         try    {
+            using iterator = std::wsmatch::value_type::iterator;
+            iterator prefix_begin{};
+            iterator prefix_end{};
             std::wsmatch wm_behind;
             auto type = std::regex_constants::ECMAScript;
-            if ( icase )    type |= std::regex_constants::icase;
+            if ( original )     //再帰呼び出しの場合
+                type |= std::regex_constants::icase;
             std::wregex wrg_behind{p_behind, type};
             if ( 0 == positive_negative )
             {
                 std::regex_search(target, wm_behind, wrg_behind);
+                prefix_begin = wm_behind.prefix().first;
+                prefix_end = wm_behind.prefix().second;
                 prefix_ = std::wstring{wm_behind.prefix()};
             }
             else
@@ -110,6 +139,8 @@ namespace mymd  {
                 std::wregex wrg_ahead{p_ahead, type};
                 std::wsmatch wm_ahead;
                 bool match_behind = std::regex_search(target, wm_behind, wrg_behind);
+                prefix_begin = wm_behind.prefix().first;
+                prefix_end = wm_behind.prefix().second;
                 prefix_ = wm_behind.prefix();
                 bool match_ahead;
                 while ( match_behind && (wm_behind[0].first < target.end()) )
@@ -118,22 +149,27 @@ namespace mymd  {
                     if ( match_ahead == positive )   break;
                     auto first = wm_behind[0].first + 1;
                     match_behind = std::regex_search(first, target.end(), wm_behind, wrg_behind);
+                    prefix_begin = target.begin();
+                    prefix_end = first;
                     prefix_ = std::wstring{target.begin(), first};
                 }
                 if ( match_ahead != positive )
                 {
+                    prefix_begin = iterator{};
+                    prefix_end = iterator{};
                     prefix_.clear();
                     wm_behind.swap(std::wsmatch{});    //初期化
                 }
             }
-            match_ = std::wstring{wm_behind.str(0)};
-            suffix_ = std::wstring{wm_behind.suffix()};
-            submatches_.clear();
+            if ( !original )    original = &target;
+            match_ = getOrinal(target, original, wm_behind[0].first, wm_behind[0].second);
+            prefix_ = getOrinal(target, original, prefix_begin, prefix_end);
+            suffix_ = getOrinal(target, original, wm_behind.suffix().first, wm_behind.suffix().second);
             auto n = wm_behind.size();
             submatches_.reserve(n-1);
             for ( std::size_t i = 1; i < n; ++i )
             {
-                submatches_.push_back(wm_behind.str(i));
+                submatches_.push_back(getOrinal(target, original, wm_behind[i].first, wm_behind[i].second));
             }
         }
         catch (const std::exception&)   {
