@@ -92,10 +92,10 @@ namespace mymd  {
     }
 
     //
-    std::wstring getOrinal(std::wstring const&                  target  , 
-                           std::wstring const*                  original,
-                           std::wsmatch::value_type::iterator   begin   ,
-                           std::wsmatch::value_type::iterator   end     )
+    std::wstring getOriginal(std::wstring const&                 target  , 
+                             std::wstring const*                 original,
+                             std::wsmatch::value_type::iterator  begin   ,
+                             std::wsmatch::value_type::iterator  end     )
     {
         return ( begin < end )? original->substr(begin - target.begin(), end - begin): std::wstring{};
     }
@@ -104,7 +104,7 @@ namespace mymd  {
     {
         // VC++のregexのバグをworkaround
         // icase 指定時に[a-z]$ も [A-Z]$ も "ABC" にマッチしない問題
-        // icase 指定時は target を小文字に揃えてしまう
+        //  ==> icase 指定時は target を小文字に揃えてしまう
         if ( icase )
         {
             auto lowerTarget(target);
@@ -123,15 +123,14 @@ namespace mymd  {
             iterator prefix_end{};
             std::wsmatch wm_behind;
             auto type = std::regex_constants::ECMAScript;
-            if ( original )     //再帰呼び出しの場合
-                type |= std::regex_constants::icase;
+            if ( original )     type |= std::regex_constants::icase;    //再帰呼び出しの場合
             std::wregex wrg_behind{p_behind, type};
+            bool match_total = false;
             if ( 0 == positive_negative )
             {
-                std::regex_search(target, wm_behind, wrg_behind);
+                match_total = std::regex_search(target, wm_behind, wrg_behind);
                 prefix_begin = wm_behind.prefix().first;
                 prefix_end = wm_behind.prefix().second;
-                prefix_ = std::wstring{wm_behind.prefix()};
             }
             else
             {
@@ -141,39 +140,37 @@ namespace mymd  {
                 bool match_behind = std::regex_search(target, wm_behind, wrg_behind);
                 prefix_begin = wm_behind.prefix().first;
                 prefix_end = wm_behind.prefix().second;
-                prefix_ = wm_behind.prefix();
                 bool match_ahead;
                 while ( match_behind && (wm_behind[0].first < target.end()) )
                 {
-                    match_ahead = std::regex_search(prefix_, wm_ahead, wrg_ahead);
-                    if ( match_ahead == positive )   break;
+                    match_ahead = std::regex_search(prefix_begin, prefix_end, wm_ahead, wrg_ahead);
+                    if ( match_ahead == positive )
+                    {
+                        match_total = true;
+                        break;
+                    }
                     auto first = wm_behind[0].first + 1;
                     match_behind = std::regex_search(first, target.end(), wm_behind, wrg_behind);
                     prefix_begin = target.begin();
-                    prefix_end = first;
-                    prefix_ = std::wstring{target.begin(), first};
-                }
-                if ( match_ahead != positive )
-                {
-                    prefix_begin = iterator{};
-                    prefix_end = iterator{};
-                    prefix_.clear();
-                    wm_behind.swap(std::wsmatch{});    //初期化
+                    prefix_end = wm_behind[0].first;
                 }
             }
             if ( !original )    original = &target;
-            match_ = getOrinal(target, original, wm_behind[0].first, wm_behind[0].second);
-            prefix_ = getOrinal(target, original, prefix_begin, prefix_end);
-            suffix_ = getOrinal(target, original, wm_behind.suffix().first, wm_behind.suffix().second);
-            auto n = wm_behind.size();
-            submatches_.reserve(n-1);
-            for ( std::size_t i = 1; i < n; ++i )
+            if ( match_total )
             {
-                submatches_.push_back(getOrinal(target, original, wm_behind[i].first, wm_behind[i].second));
+                match_ = getOriginal(target, original, wm_behind[0].first, wm_behind[0].second);
+                prefix_ = getOriginal(target, original, prefix_begin, prefix_end);
+                suffix_ = getOriginal(target, original, wm_behind.suffix().first, wm_behind.suffix().second);
+                auto n = wm_behind.size();
+                submatches_.reserve(n-1);
+                for ( std::size_t i = 1; i < n; ++i )
+                {
+                    submatches_.push_back(getOriginal(target, original, wm_behind[i].first, wm_behind[i].second));
+                }
             }
         }
         catch (const std::exception&)   {
-            return ;
+            return;
         }
     }
 
