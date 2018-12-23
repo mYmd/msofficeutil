@@ -6,3 +6,5 @@ EXPORTS
     ; 明示的なエクスポートはここへ記述できます
 
 	RegExpExec = RegExpExec
+	make_insert_expr = make_insert_expr
+	make_merge_expr = make_merge_expr

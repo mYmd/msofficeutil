@@ -1,6 +1,7 @@
 //Copyright (c) 2018 mmYYmmdd
 #pragma once
 #include <fstream>
+#include <array>
 #include <string>
 #include <algorithm>
 #include <OleAuto.h>
@@ -75,5 +76,27 @@ namespace mymd  {
         };
         return range2VArray(begin, end, trans);
     }
+
+    //********************************************************
+
+    // SafeArray要素のアクセス
+    class safearrayRef {
+        SAFEARRAY*      psa;
+        VARTYPE         pvt;
+        std::size_t     dim;
+        std::size_t     elemsize;
+        char*           it;
+        VARIANT         val_;
+        std::array<std::size_t, 3>  size;
+    public:
+        explicit safearrayRef(VARIANT const& v) noexcept;
+        ~safearrayRef();
+        safearrayRef(safearrayRef const&) = delete;
+        safearrayRef(safearrayRef&&) = delete;
+        std::size_t getDim() const noexcept;
+        std::size_t getSize(std::size_t i) const noexcept;
+        std::size_t getOriginalLBound(std::size_t i) const noexcept;
+        VARIANT& operator()(std::size_t i, std::size_t j = 0, std::size_t k = 0) noexcept;
+    };
 
 }   //namespace mymd
