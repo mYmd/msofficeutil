@@ -5,36 +5,37 @@
 #include "msofficeutil.h"
 #include <vector>
 
-namespace mymd {
+namespace   {
 
     template <typename V>
-    std::wstring make_insert_expr_imple(std::wstring, safearrayRef& attr, V&&);
+    std::wstring  make_insert_expr_imple(std::wstring, mymd::safearrayRef& attr, V&&, bool semicollon);
+
+    std::wstring    make_bulk_insert_attr_part(mymd::safearrayRef&  attr);
+
+    template <typename V>
+    std::wstring    make_bulk_insert_value_part(V&&  values, std::size_t attrSize);
 
     // MERGE INTO **** A USING(SELECT ** AS **, ** AS **, ...) B
     template <typename V>
-    std::wstring    make_using_part(wchar_t const*      schema_table_name,
-                                    std::wstring const& A_name  ,
-                                    std::wstring const& B_name  ,
-                                    safearrayRef&       attr    ,
-                                    V&&                 values  ,
-                                    bool                for_oracle);
+    std::wstring  make_using_part(wchar_t const*        schema_table_name,
+                                  std::wstring const&   alias1  ,
+                                  std::wstring const&   alias2  ,
+                                  mymd::safearrayRef&   attr    ,
+                                  V&&                   values  ,
+                                  bool                  for_oracle);
 
     // ON (A.***=B.*** AND A.***=B.***)
-    std::wstring    make_ON_expr(std::wstring const&    A_name,
-                                 std::wstring const&    B_name,
-                                 safearrayRef&          attr,
-                                 safearrayRef&          key);
+    std::wstring  make_ON_part(std::wstring const& alias1, std::wstring const& alias2, mymd::safearrayRef& attr, mymd::safearrayRef& key);
 
     //  WHEN MATCHED THEN UPDATE SET *** = B.***, ...
-    std::wstring    make_set_part(std::wstring const& B_name, safearrayRef& attr, safearrayRef& key);
+    std::wstring  make_set_part(std::wstring const& alias2, mymd::safearrayRef& attr, mymd::safearrayRef& key);
 
     // WHEN NOT MATCHED THEN INSERT (***,***,...)  VALUES (B.***, B.***, ...);
-    std::wstring    make_values_part(std::wstring const& B_name, safearrayRef& attr);
+    std::wstring  make_values_part(std::wstring const& alias2, mymd::safearrayRef& attr);
 
-    std::pair<std::wstring, std::wstring>
-    getTemporaryTableNames(std::wstring const& name);
+    std::pair<std::wstring, std::wstring> const&  getAliasTableNames(std::wstring const& name);
 
-}       //namespace mymd
+}
 
 // INSERT文の生成
 VARIANT __stdcall 
@@ -56,10 +57,10 @@ make_insert_expr(VARIANT const& schema_table_name_, VARIANT const& attr_, VARIAN
         if (0 < values.getSize(1) && 0 == (VT_ARRAY & values(0).vt))    //単一レコード
         {
             auto const bound = values.getSize(1);
-            auto value_func = [&](std::size_t j) {
+            auto value_func = [&](std::size_t j) ->VARIANT const& {
                 return (j < bound) ? values(j) : dummy;
             };
-            return mymd::bstrVariant(mymd::make_insert_expr_imple(prefix, attr, value_func));
+            return mymd::bstrVariant(make_insert_expr_imple(prefix, attr, value_func, true));
         }
         else            //複数レコードのジャグ配列
         {
@@ -67,10 +68,10 @@ make_insert_expr(VARIANT const& schema_table_name_, VARIANT const& attr_, VARIAN
             {
                 mymd::safearrayRef value2{ values(i) };
                 auto const bound = value2.getSize(1);
-                auto value_func = [&](std::size_t j) {
+                auto value_func = [&](std::size_t j) ->VARIANT const& {
                     return (j < bound) ? value2(j) : dummy;
                 };
-                buf.push_back(mymd::make_insert_expr_imple(prefix, attr, value_func));
+                buf.push_back(make_insert_expr_imple(prefix, attr, value_func, true));
             }
         }
         break;
@@ -80,10 +81,10 @@ make_insert_expr(VARIANT const& schema_table_name_, VARIANT const& attr_, VARIAN
         auto const bound = values.getSize(2);
         for (std::size_t i = 0; i < values.getSize(1); ++i)
         {
-            auto value_func = [&](std::size_t j) {
+            auto value_func = [&](std::size_t j) ->VARIANT const& {
                 return (j < bound) ? values(i, j) : dummy;
             };
-            buf.push_back(mymd::make_insert_expr_imple(prefix, attr, value_func));
+            buf.push_back(make_insert_expr_imple(prefix, attr, value_func, true));
         }
         break;
     }
@@ -95,7 +96,7 @@ make_insert_expr(VARIANT const& schema_table_name_, VARIANT const& attr_, VARIAN
                               [](std::wstring const& w) { return mymd::bstrVariant(w); });
 }
 
-
+// MERGE文の生成
 VARIANT __stdcall
 make_merge_expr(VARIANT const&  schema_table_name_  ,
                 VARIANT const&  attr_   ,
@@ -110,9 +111,9 @@ make_merge_expr(VARIANT const&  schema_table_name_  ,
     mymd::safearrayRef values{ values_ };
     if (attr.getDim() == 0 || key.getDim() == 0 || values.getDim() == 0)       return mymd::iVariant();
     std::vector<std::wstring>   buf;
-    auto const altname = mymd::getTemporaryTableNames(schema_table_name);
-    std::wstring const& A_name = altname.first;
-    std::wstring const& B_name = altname.second;
+    auto const altname = getAliasTableNames(schema_table_name);
+    std::wstring const& alias1 = altname.first;
+    std::wstring const& alias2 = altname.second;
     auto dummy = mymd::iVariant();
     auto for_oracle = (0 != oracle);
     switch (values.getDim())
@@ -122,13 +123,13 @@ make_merge_expr(VARIANT const&  schema_table_name_  ,
         if (0 < values.getSize(1) && 0 == (VT_ARRAY & values(0).vt))    //単一レコード
         {
             auto const bound = values.getSize(1);
-            auto value_func = [&](std::size_t j) {
+            auto value_func = [&](std::size_t j) ->VARIANT const& {
                 return (j < bound) ? values(j) : dummy;
             };
-            return mymd::bstrVariant( mymd::make_using_part(schema_table_name, A_name, B_name, attr, value_func, for_oracle)
-                                    + mymd::make_ON_expr(A_name, B_name, attr, key)
-                                    + mymd::make_set_part(B_name, attr, key)
-                                    + mymd::make_values_part(B_name, attr)
+            return mymd::bstrVariant( make_using_part(schema_table_name, alias1, alias2, attr, value_func, for_oracle)
+                                    + make_ON_part(alias1, alias2, attr, key)
+                                    + make_set_part(alias2, attr, key)
+                                    + make_values_part(alias2, attr)
                                     );
         }
         else            //複数レコードのジャグ配列
@@ -137,13 +138,13 @@ make_merge_expr(VARIANT const&  schema_table_name_  ,
             {
                 mymd::safearrayRef value2{ values(i) };
                 auto const bound = value2.getSize(1);
-                auto value_func = [&](std::size_t j) {
+                auto value_func = [&](std::size_t j) ->VARIANT const& {
                     return (j < bound) ? value2(j) : dummy;
                 };
-                buf.push_back(  mymd::make_using_part(schema_table_name, A_name, B_name, attr, value_func, for_oracle)
-                              + mymd::make_ON_expr(A_name, B_name, attr, key)
-                              + mymd::make_set_part(B_name, attr, key)
-                              + mymd::make_values_part(B_name, attr)
+                buf.push_back(  make_using_part(schema_table_name, alias1, alias2, attr, value_func, for_oracle)
+                              + make_ON_part(alias1, alias2, attr, key)
+                              + make_set_part(alias2, attr, key)
+                              + make_values_part(alias2, attr)
                 );
             }
         }
@@ -154,13 +155,13 @@ make_merge_expr(VARIANT const&  schema_table_name_  ,
         auto const bound = values.getSize(2);
         for (std::size_t i = 0; i < values.getSize(1); ++i)
         {
-            auto value_func = [&](std::size_t j) {
+            auto value_func = [&](std::size_t j) ->VARIANT const& {
                 return (j < bound) ? values(i, j) : dummy;
             };
-            buf.push_back(  mymd::make_using_part(schema_table_name, A_name, B_name, attr, value_func, for_oracle)
-                          + mymd::make_ON_expr(A_name, B_name, attr, key)
-                          + mymd::make_set_part(B_name, attr, key)
-                          + mymd::make_values_part(B_name, attr)
+            buf.push_back(  make_using_part(schema_table_name, alias1, alias2, attr, value_func, for_oracle)
+                          + make_ON_part(alias1, alias2, attr, key)
+                          + make_set_part(alias2, attr, key)
+                          + make_values_part(alias2, attr)
             );
         }
         break;
@@ -173,7 +174,150 @@ make_merge_expr(VARIANT const&  schema_table_name_  ,
                               [](std::wstring const& w) { return mymd::bstrVariant(w); });
 }
 
-namespace mymd {
+// BULK_INSERT文の生成
+VARIANT __stdcall
+make_bulk_insert_expr(  VARIANT const&  schema_table_name_,
+                        VARIANT const&  attr_   ,
+                        VARIANT const&  values_ ,
+                        __int32         unit_size_)
+{
+    auto schema_table_name = mymd::getBSTR(schema_table_name_);
+    if (!schema_table_name)         return mymd::iVariant();
+    mymd::safearrayRef attr{ attr_ };
+    mymd::safearrayRef values{ values_ };
+    if (attr.getDim() == 0 || values.getDim() == 0)     return mymd::iVariant();
+    if ( values.getDim() == 1 && 0 < values.getSize(1) && 0 == (VT_ARRAY & values(0).vt) )    //単一レコード
+        return make_insert_expr(schema_table_name_, attr_, values_);
+    //
+    std::wstring  expr{ L"INSERT INTO " };
+    expr += schema_table_name;
+    auto attr_part = make_bulk_insert_attr_part(attr);
+    if (attr_part.empty())        return mymd::iVariant();
+    expr += attr_part + L" VALUES ";
+    std::vector<std::wstring>   buf;
+    auto dummy = mymd::iVariant();
+    std::size_t const attrSize = attr.getSize(1);
+    switch (values.getDim())
+    {
+    case 1:
+    {
+        for (std::size_t i = 0; i < values.getSize(1); ++i)
+        {
+            mymd::safearrayRef value2{ values(i) };
+            auto const bound = value2.getSize(1);
+            auto value_func = [&](std::size_t j) ->VARIANT const& {
+                return (j < bound) ? value2(j) : dummy;
+            };
+            buf.push_back(make_bulk_insert_value_part(value_func, attrSize));
+        }
+        break;
+    }
+    case 2:            //複数レコードの2次元配列
+    {
+        auto const bound = values.getSize(2);
+        for (std::size_t i = 0; i < values.getSize(1); ++i)
+        {
+            auto value_func = [&](std::size_t j) ->VARIANT const& {
+                return (j < bound) ? values(i, j) : dummy;
+            };
+            buf.push_back(make_bulk_insert_value_part(value_func, attrSize));
+        }
+        break;
+    }
+    default:
+        return mymd::iVariant();
+    }
+    auto std_min = [](std::size_t a, std::size_t b) { return a <= b ? a : b; };
+    auto const unit_size = std_min(values.getSize(1), static_cast<std::size_t>(0 <= unit_size_ ? unit_size_ : 256));
+    auto const ret_size = (values.getSize(1) + unit_size - 1) / unit_size;
+    std::vector<VARIANT> ret;
+    for (std::size_t i = 0; i < ret_size; ++i)
+    {
+        auto tmp = expr;
+        std::for_each(buf.begin() + (i * unit_size),
+                      buf.begin() + std_min(buf.size(), (i + 1) * unit_size),
+                      [&](std::wstring const& w) { tmp += w; });
+        tmp.pop_back();
+        tmp += L';';
+        ret.push_back(mymd::bstrVariant(tmp));
+    }
+    return mymd::range2VArray(ret.begin(), ret.end());
+}
+
+// ORACLE の INSERT_ALL 文の生成
+VARIANT __stdcall
+make_insert_all_expr(VARIANT const&  schema_table_name_,
+                     VARIANT const&  attr_,
+                     VARIANT const&  values_,
+                     __int32         unit_size_)
+{
+    auto schema_table_name = mymd::getBSTR(schema_table_name_);
+    if (!schema_table_name)         return mymd::iVariant();
+    mymd::safearrayRef attr{ attr_ };
+    mymd::safearrayRef values{ values_ };
+    if (attr.getDim() == 0 || values.getDim() == 0)       return mymd::iVariant();
+    std::wstring prefix{ L"INTO " };
+    (prefix += schema_table_name) += L" (";
+    std::vector<std::wstring>   buf;
+    auto dummy = mymd::iVariant();
+    switch (values.getDim())
+    {
+    case 1:
+    {
+        if (0 < values.getSize(1) && 0 == (VT_ARRAY & values(0).vt))    //単一レコード
+        {
+            auto const bound = values.getSize(1);
+            auto value_func = [&](std::size_t j) ->VARIANT const& {
+                return (j < bound) ? values(j) : dummy;
+            };
+            return mymd::bstrVariant(make_insert_expr_imple(L"INSERT " + prefix, attr, value_func, false));
+        }
+        else            //複数レコードのジャグ配列
+        {
+            for (std::size_t i = 0; i < values.getSize(1); ++i)
+            {
+                mymd::safearrayRef value2{ values(i) };
+                auto const bound = value2.getSize(1);
+                auto value_func = [&](std::size_t j) ->VARIANT const& {
+                    return (j < bound) ? value2(j) : dummy;
+                };
+                buf.push_back(make_insert_expr_imple(prefix, attr, value_func, false));
+            }
+        }
+        break;
+    }
+    case 2:            //複数レコードの2次元配列
+    {
+        auto const bound = values.getSize(2);
+        for (std::size_t i = 0; i < values.getSize(1); ++i)
+        {
+            auto value_func = [&](std::size_t j) ->VARIANT const& {
+                return (j < bound) ? values(i, j) : dummy;
+            };
+            buf.push_back(make_insert_expr_imple(prefix, attr, value_func, false));
+        }
+        break;
+    }
+    default:
+        return mymd::iVariant();
+    }
+    auto std_min = [](std::size_t a, std::size_t b) { return a <= b ? a : b; };
+    auto const unit_size = std_min(values.getSize(1), static_cast<std::size_t>(0 <= unit_size_ ? unit_size_ : 256));
+    auto const ret_size = (values.getSize(1) + unit_size - 1) / unit_size;
+    std::vector<VARIANT> ret;
+    for (std::size_t i = 0; i < ret_size; ++i)
+    {
+        std::wstring tmp{ L"INSERT ALL " };
+        std::for_each(buf.begin() + (i * unit_size),
+                        buf.begin() + std_min(buf.size(), (i + 1) * unit_size),
+                        [&](std::wstring const& w) { tmp += w; });
+        tmp += L"SELECT * FROM DUAL;";
+        ret.push_back(mymd::bstrVariant(tmp));
+    }
+    return mymd::range2VArray(ret.begin(), ret.end());
+}
+
+namespace   {
 
 //浮動小数をあらわす文字列から末尾の 0（と.） を除去する　（指数表示ではない前提）
 std::wstring&   trimfloat(std::wstring& fw)
@@ -202,11 +346,11 @@ std::wstring&   quote_double(std::wstring& w, BSTR s)
     class   valueof_variant {
         std::wstring value_;
     public:
-        std::wstring const& value() {   return value_;  }
-        bool operator ()(VARIANT& v, bool evaluate_null = false)
+        std::wstring const& value() const {   return value_;  }
+        bool operator ()(VARIANT const& v, bool evaluate_null = false)
         {
             value_.clear();
-            auto b = getBSTR(v);
+            auto b = mymd::getBSTR(v);
             if (b)
             {
                 value_ = (L'\'' + quote_double(value_, b) + L'\'');
@@ -214,7 +358,7 @@ std::wstring&   quote_double(std::wstring& w, BSTR s)
             }
             else
             {
-                auto varDest = iVariant();
+                auto varDest = mymd::iVariant();
                 switch (v.vt)
                 {
                 case VT_EMPTY: case VT_NULL:
@@ -247,18 +391,18 @@ std::wstring&   quote_double(std::wstring& w, BSTR s)
     };
 
 template <typename V>
-std::wstring    make_insert_expr_imple(std::wstring     prefix  ,
-                                       safearrayRef&    attr    ,
-                                       V&&              values  )
+std::wstring    make_insert_expr_imple(std::wstring         prefix  ,
+                                       mymd::safearrayRef&  attr    ,
+                                       V&&                  values  ,
+                                       bool                 semicollon)
 {
-    //VT_EMPTY        VT_NULL
     std::wstring value_part{ L") VALUES (" };
     bool valid{ false };
     BSTR b;
     valueof_variant vv;
     for (std::size_t j = 0; j < attr.getSize(1); ++j)
     {
-        if ( vv(std::forward<V>(values)(j)) && (b = getBSTR(attr(j))) )
+        if ( vv(std::forward<V>(values)(j)) && (b = mymd::getBSTR(attr(j))) )
         {
             prefix += b;    prefix += L',';
             value_part += vv.value() + L',';
@@ -269,7 +413,7 @@ std::wstring    make_insert_expr_imple(std::wstring     prefix  ,
     {
         prefix.pop_back();
         value_part.pop_back();
-        return prefix + value_part + L");";
+        return prefix + value_part + (semicollon ? L");" : L") ");
     }
     else
     {
@@ -277,48 +421,78 @@ std::wstring    make_insert_expr_imple(std::wstring     prefix  ,
     }
 }
 
+//  (F1,F2,...FN)
+std::wstring    make_bulk_insert_attr_part(mymd::safearrayRef&  attr)
+{
+    std::wstring attr_part{ L" (" };
+    BSTR b;
+    for (std::size_t j = 0; j < attr.getSize(1); ++j)
+    {
+        b = mymd::getBSTR(attr(j));
+        if (!b)   return std::wstring{};
+        (attr_part += b) += L',';
+    }
+    attr_part.pop_back();
+    return attr_part + L')';
+}
+
+// (value1,value2,..,valueN)   + (,| )
+template <typename V>
+std::wstring    make_bulk_insert_value_part(V&&  values, std::size_t attrSize)
+{
+    std::wstring value_part{ L'(' };
+    valueof_variant vv;
+    for ( std::size_t j = 0; j < attrSize; ++j )
+    {
+        if ( vv(std::forward<V>(values)(j)) )   value_part += vv.value() + L',';
+        else                                    value_part += L"NULL,";
+    }
+    value_part.pop_back();
+    return value_part + L"),";
+}
+
 //***********************************************************************
 // MERGE INTO **** A USING(SELECT ** AS **, ** AS **, ...) B
 template <typename V>
 std::wstring    make_using_part(wchar_t const*      schema_table_name,
-                                std::wstring const& A_name  ,
-                                std::wstring const& B_name  ,
-                                safearrayRef&       attr    ,
+                                std::wstring const& alias1  ,
+                                std::wstring const& alias2  ,
+                                mymd::safearrayRef& attr    ,
                                 V&&                 values  ,
                                 bool                for_oracle)
 {
     std::wstring prefix{ L"MERGE INTO " };
-    (prefix += schema_table_name) += (L' ' + A_name + L" USING(SELECT ");
+    (prefix += schema_table_name) += (L' ' + alias1 + L" USING(SELECT ");
     valueof_variant vv;
     BSTR attributename;
     for (std::size_t j = 0; j < attr.getSize(1); ++j)
-        if ( vv(std::forward<V>(values)(j), true) && (attributename = getBSTR(attr(j))) )
+        if (vv(std::forward<V>(values)(j), true) && (attributename = mymd::getBSTR(attr(j))))
             prefix += vv.value() + L" AS " + attributename + L',';
     prefix.pop_back();
-    if (for_oracle)     prefix += L" FROM DUAL) " + B_name;
-    else                prefix += L") " + B_name;
+    if (for_oracle)     prefix += L" FROM DUAL) " + alias2;
+    else                prefix += L") " + alias2;
     return prefix;
 }
 
 // ON (A.***=B.*** AND A.***=B.***)
-std::wstring    make_ON_expr(std::wstring const&    A_name,
-                             std::wstring const&    B_name,
-                             safearrayRef&          attr,
-                             safearrayRef&          key)
+std::wstring    make_ON_part(std::wstring const&    alias1  ,
+                             std::wstring const&    alias2  ,
+                             mymd::safearrayRef&    attr,
+                             mymd::safearrayRef&    key)
 { 
     std::wstring ret{ L" ON (" };
     std::size_t const attr_len = attr.getSize(1);
     std::size_t const key_len = key.getSize(1);
     std::size_t const bound = attr_len < key_len ? attr_len : key_len;
-    auto varDest = iVariant();
+    auto varDest = mymd::iVariant();
     BSTR b;
     for (std::size_t i = 0; i < bound; ++i)
     {
         if (S_OK == ::VariantChangeType(&varDest, &key(i), 0, VT_I4)
             && 0 != varDest.lVal                    // キーであるカラム
-            && (b = getBSTR(attr(i))))
+            && (b = mymd::getBSTR(attr(i))))
         {
-            ret += (A_name + L'.' + b + L'=' + B_name + L'.' + b + L" AND ");
+            ret += (alias1 + L'.' + b + L'=' + alias2 + L'.' + b + L" AND ");
         }
     }
     ret.erase(ret.end() - 5, ret.end());
@@ -326,21 +500,21 @@ std::wstring    make_ON_expr(std::wstring const&    A_name,
 }
 
 //  WHEN MATCHED THEN UPDATE SET *** = B.***, ...
-std::wstring    make_set_part(std::wstring const& B_name, safearrayRef& attr, safearrayRef& key)
+std::wstring    make_set_part(std::wstring const& alias2, mymd::safearrayRef& attr, mymd::safearrayRef& key)
 {
     std::wstring ret{ L" WHEN MATCHED THEN UPDATE SET " };
     std::size_t const key_len = key.getSize(1);
     std::size_t const bound = attr.getSize(1);
-    auto varDest = iVariant();
+    auto varDest = mymd::iVariant();
     BSTR attributename;
     for (std::size_t i = 0; i < bound; ++i)
     {
         if ((key_len <= i ||
             (S_OK == ::VariantChangeType(&varDest, &key(i), 0, VT_I4) && 0 == varDest.lVal)        // キーでないカラム
              )
-            && (attributename = getBSTR(attr(i))))
+            && (attributename = mymd::getBSTR(attr(i))))
         {
-            (ret += attributename) += (L'=' + B_name + L'.' + attributename + L',');
+            (ret += attributename) += (L'=' + alias2 + L'.' + attributename + L',');
         }
     }
     if (!ret.empty())   ret.pop_back();
@@ -348,32 +522,34 @@ std::wstring    make_set_part(std::wstring const& B_name, safearrayRef& attr, sa
 }
 
 // WHEN NOT MATCHED THEN INSERT (***,***,...)  VALUES (B.***, B.***, ...);
-std::wstring    make_values_part(std::wstring const& B_name, safearrayRef& attr)
+std::wstring    make_values_part(std::wstring const& alias2, mymd::safearrayRef& attr)
 {
     std::wstring ret1{ L" WHEN NOT MATCHED THEN INSERT (" };
     std::wstring ret2{ L" VALUES (" };
     std::size_t const bound = attr.getSize(1);
     BSTR attributename;
     for (std::size_t i = 0; i < bound; ++i)
-        if (nullptr != (attributename = getBSTR(attr(i))))
+        if (nullptr != (attributename = mymd::getBSTR(attr(i))))
         {
             (ret1 += attributename) += L',';
-            ret2 += B_name + L'.' + attributename + L',';
+            ret2 += alias2 + L'.' + attributename + L',';
         }
     ret1.pop_back();
     ret2.pop_back();
     return ret1 + L')' + ret2 + L");";
 }
 
-std::pair<std::wstring, std::wstring>
-getTemporaryTableNames(std::wstring const& name)
+std::pair<std::wstring, std::wstring> const&
+getAliasTableNames(std::wstring const& name)
 {
-    if (name.empty())                           return { L"A1", L"A2" };
+    static std::pair<std::wstring, std::wstring> const A_Name{ L"A1", L"A2" };
+    static std::pair<std::wstring, std::wstring> const B_Name{ L"B1", L"B2" };
+    if (name.empty())                           return A_Name;
     std::wstring::size_type p{ 0 };
     if (std::wstring::npos == (p = name.find_last_of(L'.')))    p = 0;
     else if (p + 1 < name.size())                               ++p;
-    if (name[p] == L'A' || name[p] == L'a')     return { L"B1", L"B2" };
-    else                                        return { L"A1", L"A2" };
+    if (name[p] == L'A' || name[p] == L'a')     return B_Name;
+    else                                        return A_Name;
 }
 
-}   //namespace mymd
+}

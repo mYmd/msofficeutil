@@ -8,3 +8,5 @@ EXPORTS
 	RegExpExec = RegExpExec
 	make_insert_expr = make_insert_expr
 	make_merge_expr = make_merge_expr
+	make_bulk_insert_expr = make_bulk_insert_expr
+	make_insert_all_expr = make_insert_all_expr
