@@ -398,13 +398,14 @@ std::wstring    make_insert_expr_imple(std::wstring         prefix  ,
 {
     std::wstring value_part{ L") VALUES (" };
     bool valid{ false };
-    BSTR b;
     valueof_variant vv;
     for (std::size_t j = 0; j < attr.getSize(1); ++j)
     {
-        if ( vv(std::forward<V>(values)(j)) && (b = mymd::getBSTR(attr(j))) )
+        BSTR attributename;
+        if ( vv(std::forward<V>(values)(j)) && (attributename = mymd::getBSTR(attr(j))) )
         {
-            prefix += b;    prefix += L',';
+            prefix += attributename;
+            prefix += L',';
             value_part += vv.value() + L',';
             valid = true;
         }
@@ -425,10 +426,9 @@ std::wstring    make_insert_expr_imple(std::wstring         prefix  ,
 std::wstring    make_bulk_insert_attr_part(mymd::safearrayRef&  attr)
 {
     std::wstring attr_part{ L" (" };
-    BSTR b;
     for (std::size_t j = 0; j < attr.getSize(1); ++j)
     {
-        b = mymd::getBSTR(attr(j));
+        auto b = mymd::getBSTR(attr(j));
         if (!b)   return std::wstring{};
         (attr_part += b) += L',';
     }
@@ -464,10 +464,12 @@ std::wstring    make_using_part(wchar_t const*      schema_table_name,
     std::wstring prefix{ L"MERGE INTO " };
     (prefix += schema_table_name) += (L' ' + alias1 + L" USING(SELECT ");
     valueof_variant vv;
-    BSTR attributename;
     for (std::size_t j = 0; j < attr.getSize(1); ++j)
+    {
+        BSTR attributename;
         if (vv(std::forward<V>(values)(j), true) && (attributename = mymd::getBSTR(attr(j))))
             prefix += vv.value() + L" AS " + attributename + L',';
+    }
     prefix.pop_back();
     if (for_oracle)     prefix += L" FROM DUAL) " + alias2;
     else                prefix += L") " + alias2;
@@ -485,14 +487,14 @@ std::wstring    make_ON_part(std::wstring const&    alias1  ,
     std::size_t const key_len = key.getSize(1);
     std::size_t const bound = attr_len < key_len ? attr_len : key_len;
     auto varDest = mymd::iVariant();
-    BSTR b;
     for (std::size_t i = 0; i < bound; ++i)
     {
-        if (S_OK == ::VariantChangeType(&varDest, &key(i), 0, VT_I4)
-            && 0 != varDest.lVal                    // キーであるカラム
-            && (b = mymd::getBSTR(attr(i))))
+        BSTR attributename;
+        if ( S_OK == ::VariantChangeType(&varDest, &key(i), 0, VT_I4)
+             && 0 != varDest.lVal                    // キーであるカラム
+             && (attributename = mymd::getBSTR(attr(i))) )
         {
-            ret += (alias1 + L'.' + b + L'=' + alias2 + L'.' + b + L" AND ");
+            ret += (alias1 + L'.' + attributename + L'=' + alias2 + L'.' + attributename + L" AND ");
         }
     }
     ret.erase(ret.end() - 5, ret.end());
@@ -506,9 +508,9 @@ std::wstring    make_set_part(std::wstring const& alias2, mymd::safearrayRef& at
     std::size_t const key_len = key.getSize(1);
     std::size_t const bound = attr.getSize(1);
     auto varDest = mymd::iVariant();
-    BSTR attributename;
     for (std::size_t i = 0; i < bound; ++i)
     {
+        BSTR attributename;
         if ((key_len <= i ||
             (S_OK == ::VariantChangeType(&varDest, &key(i), 0, VT_I4) && 0 == varDest.lVal)        // キーでないカラム
              )
@@ -527,13 +529,15 @@ std::wstring    make_values_part(std::wstring const& alias2, mymd::safearrayRef&
     std::wstring ret1{ L" WHEN NOT MATCHED THEN INSERT (" };
     std::wstring ret2{ L" VALUES (" };
     std::size_t const bound = attr.getSize(1);
-    BSTR attributename;
     for (std::size_t i = 0; i < bound; ++i)
+    {
+        BSTR attributename;
         if (nullptr != (attributename = mymd::getBSTR(attr(i))))
         {
             (ret1 += attributename) += L',';
             ret2 += alias2 + L'.' + attributename + L',';
         }
+    }
     ret1.pop_back();
     ret2.pop_back();
     return ret1 + L')' + ret2 + L");";
