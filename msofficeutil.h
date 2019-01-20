@@ -7,11 +7,6 @@
 #include <OleAuto.h>
 #include <tchar.h>
 #include <memory>
-#include <type_traits>
-
-#define SECURITY_WIN32
-#include <Security.h>
-#pragma comment(lib, "secur32.lib")
 
 #if _MSC_VER < 1900
 #define noexcept throw()
