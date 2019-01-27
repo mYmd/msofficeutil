@@ -4,20 +4,30 @@
 #include "stdafx.h"
 #include "msofficeutil.h"
 #include <vector>
+#include <limits>
 
 namespace   {
 
-    template <typename V>
-    std::wstring  make_insert_expr_imple(std::wstring, mymd::safearrayRef& attr, V&&, bool semicollon);
+    // VARIANT の各種値を
+    class   valueof_variant {
+        std::wstring value_;
+    public:
+        std::wstring const& value() const { return value_; }
+        bool operator ()(VARIANT const& v, bool evaluate_null = false);
+    };
 
-    std::wstring    make_bulk_insert_attr_part(mymd::safearrayRef&  attr);
+    template <typename V>
+    std::wstring  make_insert_expr_imple(valueof_variant&, std::wstring, mymd::safearrayRef&, V&&, bool);
+
+    std::wstring  make_bulk_insert_attr_part(mymd::safearrayRef&);
 
     template <typename V>
-    std::wstring    make_bulk_insert_value_part(V&&  values, std::size_t attrSize);
+    std::wstring  make_bulk_insert_value_part(valueof_variant&, V&&, std::size_t);
 
     // MERGE INTO **** A USING(SELECT ** AS **, ** AS **, ...) B
     template <typename V>
-    std::wstring  make_using_part(wchar_t const*        schema_table_name,
+    std::wstring  make_using_part(valueof_variant&      vv,
+                                  wchar_t const*        schema_table_name,
                                   std::wstring const&   alias1  ,
                                   std::wstring const&   alias2  ,
                                   mymd::safearrayRef&   attr    ,
@@ -50,6 +60,7 @@ make_insert_expr(VARIANT const& schema_table_name_, VARIANT const& attr_, VARIAN
     (prefix += schema_table_name) += L" (";
     std::vector<std::wstring>   buf;
     auto dummy = mymd::iVariant();
+    valueof_variant  vv;
     switch (values.getDim())
     {
     case 1:
@@ -60,7 +71,7 @@ make_insert_expr(VARIANT const& schema_table_name_, VARIANT const& attr_, VARIAN
             auto value_func = [&](std::size_t j) ->VARIANT const& {
                 return (j < bound) ? values(j) : dummy;
             };
-            return mymd::bstrVariant(make_insert_expr_imple(prefix, attr, value_func, true));
+            return mymd::bstrVariant(make_insert_expr_imple(vv, prefix, attr, value_func, true));
         }
         else            //複数レコードのジャグ配列
         {
@@ -71,7 +82,7 @@ make_insert_expr(VARIANT const& schema_table_name_, VARIANT const& attr_, VARIAN
                 auto value_func = [&](std::size_t j) ->VARIANT const& {
                     return (j < bound) ? value2(j) : dummy;
                 };
-                buf.push_back(make_insert_expr_imple(prefix, attr, value_func, true));
+                buf.push_back(make_insert_expr_imple(vv, prefix, attr, value_func, true));
             }
         }
         break;
@@ -84,7 +95,7 @@ make_insert_expr(VARIANT const& schema_table_name_, VARIANT const& attr_, VARIAN
             auto value_func = [&](std::size_t j) ->VARIANT const& {
                 return (j < bound) ? values(i, j) : dummy;
             };
-            buf.push_back(make_insert_expr_imple(prefix, attr, value_func, true));
+            buf.push_back(make_insert_expr_imple(vv, prefix, attr, value_func, true));
         }
         break;
     }
@@ -115,6 +126,7 @@ make_merge_expr(VARIANT const&  schema_table_name_  ,
     std::wstring const& alias1 = altname.first;
     std::wstring const& alias2 = altname.second;
     auto dummy = mymd::iVariant();
+    valueof_variant vv;
     auto for_oracle = (0 != oracle);
     switch (values.getDim())
     {
@@ -126,7 +138,7 @@ make_merge_expr(VARIANT const&  schema_table_name_  ,
             auto value_func = [&](std::size_t j) ->VARIANT const& {
                 return (j < bound) ? values(j) : dummy;
             };
-            return mymd::bstrVariant( make_using_part(schema_table_name, alias1, alias2, attr, value_func, for_oracle)
+            return mymd::bstrVariant( make_using_part(vv, schema_table_name, alias1, alias2, attr, value_func, for_oracle)
                                     + make_ON_part(alias1, alias2, attr, key)
                                     + make_set_part(alias2, attr, key)
                                     + make_values_part(alias2, attr)
@@ -141,7 +153,7 @@ make_merge_expr(VARIANT const&  schema_table_name_  ,
                 auto value_func = [&](std::size_t j) ->VARIANT const& {
                     return (j < bound) ? value2(j) : dummy;
                 };
-                buf.push_back(  make_using_part(schema_table_name, alias1, alias2, attr, value_func, for_oracle)
+                buf.push_back(  make_using_part(vv, schema_table_name, alias1, alias2, attr, value_func, for_oracle)
                               + make_ON_part(alias1, alias2, attr, key)
                               + make_set_part(alias2, attr, key)
                               + make_values_part(alias2, attr)
@@ -158,7 +170,7 @@ make_merge_expr(VARIANT const&  schema_table_name_  ,
             auto value_func = [&](std::size_t j) ->VARIANT const& {
                 return (j < bound) ? values(i, j) : dummy;
             };
-            buf.push_back(  make_using_part(schema_table_name, alias1, alias2, attr, value_func, for_oracle)
+            buf.push_back(  make_using_part(vv, schema_table_name, alias1, alias2, attr, value_func, for_oracle)
                           + make_ON_part(alias1, alias2, attr, key)
                           + make_set_part(alias2, attr, key)
                           + make_values_part(alias2, attr)
@@ -196,6 +208,7 @@ make_bulk_insert_expr(  VARIANT const&  schema_table_name_,
     expr += attr_part + L" VALUES ";
     std::vector<std::wstring>   buf;
     auto dummy = mymd::iVariant();
+    valueof_variant  vv;
     std::size_t const attrSize = attr.getSize(1);
     switch (values.getDim())
     {
@@ -208,7 +221,7 @@ make_bulk_insert_expr(  VARIANT const&  schema_table_name_,
             auto value_func = [&](std::size_t j) ->VARIANT const& {
                 return (j < bound) ? value2(j) : dummy;
             };
-            buf.push_back(make_bulk_insert_value_part(value_func, attrSize));
+            buf.push_back(make_bulk_insert_value_part(vv, value_func, attrSize));
         }
         break;
     }
@@ -220,7 +233,7 @@ make_bulk_insert_expr(  VARIANT const&  schema_table_name_,
             auto value_func = [&](std::size_t j) ->VARIANT const& {
                 return (j < bound) ? values(i, j) : dummy;
             };
-            buf.push_back(make_bulk_insert_value_part(value_func, attrSize));
+            buf.push_back(make_bulk_insert_value_part(vv, value_func, attrSize));
         }
         break;
     }
@@ -260,6 +273,7 @@ make_insert_all_expr(VARIANT const&  schema_table_name_,
     (prefix += schema_table_name) += L" (";
     std::vector<std::wstring>   buf;
     auto dummy = mymd::iVariant();
+    valueof_variant vv;
     switch (values.getDim())
     {
     case 1:
@@ -270,7 +284,7 @@ make_insert_all_expr(VARIANT const&  schema_table_name_,
             auto value_func = [&](std::size_t j) ->VARIANT const& {
                 return (j < bound) ? values(j) : dummy;
             };
-            return mymd::bstrVariant(make_insert_expr_imple(L"INSERT " + prefix, attr, value_func, false));
+            return mymd::bstrVariant(make_insert_expr_imple(vv, L"INSERT " + prefix, attr, value_func, false));
         }
         else            //複数レコードのジャグ配列
         {
@@ -281,7 +295,7 @@ make_insert_all_expr(VARIANT const&  schema_table_name_,
                 auto value_func = [&](std::size_t j) ->VARIANT const& {
                     return (j < bound) ? value2(j) : dummy;
                 };
-                buf.push_back(make_insert_expr_imple(prefix, attr, value_func, false));
+                buf.push_back(make_insert_expr_imple(vv, prefix, attr, value_func, false));
             }
         }
         break;
@@ -294,7 +308,7 @@ make_insert_all_expr(VARIANT const&  schema_table_name_,
             auto value_func = [&](std::size_t j) ->VARIANT const& {
                 return (j < bound) ? values(i, j) : dummy;
             };
-            buf.push_back(make_insert_expr_imple(prefix, attr, value_func, false));
+            buf.push_back(make_insert_expr_imple(vv, prefix, attr, value_func, false));
         }
         break;
     }
@@ -319,86 +333,15 @@ make_insert_all_expr(VARIANT const&  schema_table_name_,
 
 namespace   {
 
-//浮動小数をあらわす文字列から末尾の 0（と.） を除去する　（指数表示ではない前提）
-std::wstring&   trimfloat(std::wstring& fw)
-{
-    if (std::wstring::npos != fw.find(L'.'))    //小数点があれば
-    {
-        while (fw.back() == L'0')       fw.pop_back();
-        if (fw.back() == L'.')          fw.pop_back();
-        if (fw.empty() || fw == L"-" || fw == L"+")   fw = L'0';
-    }
-    return fw;
-}
-
-std::wstring&   quote_double(std::wstring& w, BSTR s)
-{
-    w = s;
-    std::wstring::size_type pos{ std::wstring::npos };
-    while (std::wstring::npos != (pos = w.find_last_of(L'\'', pos)))    // 'があれば
-    {
-        w.insert(pos, 1, L'\'');
-        if (0 == pos--) break;
-    }
-    return w;
-}
-
-    class   valueof_variant {
-        std::wstring value_;
-    public:
-        std::wstring const& value() const {   return value_;  }
-        bool operator ()(VARIANT const& v, bool evaluate_null = false)
-        {
-            value_.clear();
-            auto b = mymd::getBSTR(v);
-            if (b)
-            {
-                value_ = (L'\'' + quote_double(value_, b) + L'\'');
-                return true;
-            }
-            else
-            {
-                auto varDest = mymd::iVariant();
-                switch (v.vt)
-                {
-                case VT_EMPTY: case VT_NULL:
-                    if (evaluate_null)      value_ = L"NULL";
-                    return  evaluate_null;
-                case VT_R4:
-                    value_ = trimfloat(std::to_wstring(v.fltVal));
-                    return true;
-                case VT_R8:
-                    value_ = trimfloat(std::to_wstring(v.dblVal));
-                    return true;
-                case VT_I1: case VT_I2: case VT_I4: case VT_I8:
-                    if (S_OK == ::VariantChangeType(&varDest, &v, 0, VT_I8))
-                    {
-                        value_ = std::to_wstring(varDest.llVal);
-                        return true;
-                    }
-                    else    return false;
-                case VT_DATE: case VT_CY:
-                    if (S_OK == ::VariantChangeType(&varDest, &v, 0, VT_BSTR))
-                    {
-                        value_ = L'\'';    value_ += varDest.bstrVal;    value_ += L'\'';
-                        return true;
-                    }
-                    else    return false;
-                default:    return false;
-                }
-            }
-        }
-    };
-
 template <typename V>
-std::wstring    make_insert_expr_imple(std::wstring         prefix  ,
+std::wstring    make_insert_expr_imple(valueof_variant&     vv      ,
+                                       std::wstring         prefix  ,
                                        mymd::safearrayRef&  attr    ,
                                        V&&                  values  ,
                                        bool                 semicollon)
 {
     std::wstring value_part{ L") VALUES (" };
     bool valid{ false };
-    valueof_variant vv;
     for (std::size_t j = 0; j < attr.getSize(1); ++j)
     {
         BSTR attributename;
@@ -438,10 +381,9 @@ std::wstring    make_bulk_insert_attr_part(mymd::safearrayRef&  attr)
 
 // (value1,value2,..,valueN)   + (,| )
 template <typename V>
-std::wstring    make_bulk_insert_value_part(V&&  values, std::size_t attrSize)
+std::wstring    make_bulk_insert_value_part(valueof_variant& vv, V&& values, std::size_t attrSize)
 {
     std::wstring value_part{ L'(' };
-    valueof_variant vv;
     for ( std::size_t j = 0; j < attrSize; ++j )
     {
         if ( vv(std::forward<V>(values)(j)) )   value_part += vv.value() + L',';
@@ -454,7 +396,8 @@ std::wstring    make_bulk_insert_value_part(V&&  values, std::size_t attrSize)
 //***********************************************************************
 // MERGE INTO **** A USING(SELECT ** AS **, ** AS **, ...) B
 template <typename V>
-std::wstring    make_using_part(wchar_t const*      schema_table_name,
+std::wstring    make_using_part(valueof_variant&    vv      ,
+                                wchar_t const*      schema_table_name,
                                 std::wstring const& alias1  ,
                                 std::wstring const& alias2  ,
                                 mymd::safearrayRef& attr    ,
@@ -463,7 +406,6 @@ std::wstring    make_using_part(wchar_t const*      schema_table_name,
 {
     std::wstring prefix{ L"MERGE INTO " };
     (prefix += schema_table_name) += (L' ' + alias1 + L" USING(SELECT ");
-    valueof_variant vv;
     for (std::size_t j = 0; j < attr.getSize(1); ++j)
     {
         BSTR attributename;
@@ -554,6 +496,75 @@ getAliasTableNames(std::wstring const& name)
     else if (p + 1 < name.size())                               ++p;
     if (name[p] == L'A' || name[p] == L'a')     return B_Name;
     else                                        return A_Name;
+}
+
+// *****************************************
+
+// ' があれば重ねる
+void  quote_double(std::wstring& w, BSTR s)
+{
+    w = L'x';
+    w += s;
+    std::wstring::size_type pos{ std::wstring::npos };
+    while (std::wstring::npos != (pos = w.find_last_of(L'\'', pos)))    // 'があれば
+    {
+        w.insert(pos, 1, L'\'');
+        if (0 == pos--) break;
+    }
+    w[0] = L'\'';
+    w.push_back(L'\'');
+}
+
+// 浮動小数を文字列化
+void to_wstring2(std::wstring& w, double val)
+{
+    //                       -   1.                 mantissa                 e   +  nnn \0
+    const std::size_t size = 1 + 2 + std::numeric_limits<double>::digits10 + 1 + 1 + 3 + 1;
+    w.resize(size);
+    auto n = std::swprintf(&w[0], size, L"%.15e", val);
+    w.resize(n);
+}
+
+bool valueof_variant::operator ()(VARIANT const& v, bool evaluate_null)
+{
+    value_.clear();
+    auto b = mymd::getBSTR(v);
+    if (b)
+    {
+        quote_double(value_, b);
+        return true;
+    }
+    else
+    {
+        auto varDest = mymd::iVariant();
+        switch (v.vt)
+        {
+        case VT_EMPTY: case VT_NULL:
+            if (evaluate_null)      value_ = L"NULL";
+            return  evaluate_null;
+        case VT_R4:
+            to_wstring2(value_, v.fltVal);
+            return true;
+        case VT_R8:
+            to_wstring2(value_, v.dblVal);
+            return true;
+        case VT_I1: case VT_I2: case VT_I4: case VT_I8:
+            if (S_OK == ::VariantChangeType(&varDest, &v, 0, VT_I8))
+            {
+                value_ = std::to_wstring(varDest.llVal);
+                return true;
+            }
+            else    return false;
+        case VT_DATE: case VT_CY:
+            if (S_OK == ::VariantChangeType(&varDest, &v, 0, VT_BSTR))
+            {
+                value_ = L'\'';    value_ += varDest.bstrVal;    value_ += L'\'';
+                return true;
+            }
+            else    return false;
+        default:    return false;
+        }
+    }
 }
 
 }
