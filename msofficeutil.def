@@ -10,3 +10,17 @@ EXPORTS
 	make_merge_expr = make_merge_expr
 	make_bulk_insert_expr = make_bulk_insert_expr
 	make_insert_all_expr = make_insert_all_expr
+	changeFileTimeStamp = changeFileTimeStamp
+	getFileTimeStamp = getFileTimeStamp
+	EnumTaskArguments = EnumTaskArguments
+	EditTaskArguments = EditTaskArguments
+	Task_ON_OFF_Status = Task_ON_OFF_Status
+	Task_ON_OFF_Change = Task_ON_OFF_Change
+	Map_CSV = Map_CSV
+
+	write_mmap = write_mmap
+	reserve_mmap = reserve_mmap
+	closeHandle = closeHandle
+	read_mmap = read_mmap
+	VariantToJson = VariantToJson
+	JsonToVariant = JsonToVariant

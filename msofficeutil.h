@@ -7,6 +7,7 @@
 #include <OleAuto.h>
 #include <tchar.h>
 #include <memory>
+#include <objbase.h>
 
 #if _MSC_VER < 1900
 #define noexcept throw()
@@ -98,6 +99,34 @@ namespace mymd  {
         std::size_t getSize(std::size_t i) const noexcept;
         std::size_t getOriginalLBound(std::size_t i) const noexcept;
         VARIANT& operator()(std::size_t i, std::size_t j = 0, std::size_t k = 0) noexcept;
+    };
+
+    //********************************************************
+    // COM—p‚ÌRAII
+    class CoInitializer {
+        HRESULT hres;
+        CoInitializer(CoInitializer const&) = delete;
+        CoInitializer(CoInitializer&&) = delete;
+        CoInitializer operator =(CoInitializer const&) = delete;
+    public:
+        CoInitializer() : hres{ ::CoInitialize(NULL) } {   }
+        ~CoInitializer() { if (hres == S_OK) ::CoUninitialize(); }
+        operator bool() const { return hres == S_OK; }
+    };
+
+    template <typename T>
+    class ComInstanceRaii {
+        T* ptr;
+        ComInstanceRaii(ComInstanceRaii const&) = delete;
+        ComInstanceRaii(ComInstanceRaii&&) = delete;
+        ComInstanceRaii operator =(ComInstanceRaii const&) = delete;
+    public:
+        ComInstanceRaii() : ptr{ nullptr } {   }
+        ~ComInstanceRaii() { if (ptr) ptr->Release(); }
+        T* operator->() { return ptr; }
+        T const* operator->() const { return ptr; }
+        T** operator&() { return &ptr; }
+        T const** operator&() const { return &ptr; }
     };
 
 }   //namespace mymd
