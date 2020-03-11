@@ -39,7 +39,7 @@ Function execPythonModule(ByVal scriptPath As String, ParamArray ParameterS() As
     Dim ReturnBuffer As mmap:   Set ReturnBuffer = Nothing
     For Each z In ParameterS
         If TypeName(z) = "mmap" Then
-            arguments = arguments & " " & z.Name & " " & z.Size
+            arguments = arguments & " " & z.Name & "+" & z.Size
             If Left(z.Name, 1) = "R" Then Set ReturnBuffer = z
         Else
             arguments = arguments & " " & z
@@ -61,7 +61,7 @@ Function execPythonModule(ByVal scriptPath As String, ParamArray ParameterS() As
 End Function
 
 
-    'for mmap Class（mmapクラスで使う）
+    'for mmap Class（mmapクラスインスタンスの初期化時のオブジェクト名）
     Public Function for_Class_Initialize() As String
         Static guid_ As String
         If Len(guid_) = 0 Then guid_ = getGUID_()
